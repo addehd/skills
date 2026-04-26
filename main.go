@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/alecthomas/chroma/formatters/html"
@@ -65,14 +66,89 @@ func main() {
 	}
 }
 
+type mermaidImage struct {
+	placeholder string
+	tmpFile     string
+}
+
+var mermaidBlockRe = regexp.MustCompile("(?s)```mermaid\\s*\n(.*?)```")
+
+func hasMmdc() bool {
+	_, err := exec.LookPath("mmdc")
+	return err == nil
+}
+
+func renderMermaidToPNG(source string, tmpDir string, idx int) (string, error) {
+	inFile := filepath.Join(tmpDir, fmt.Sprintf("mermaid-%d.mmd", idx))
+	outFile := filepath.Join(tmpDir, fmt.Sprintf("mermaid-%d.png", idx))
+
+	if err := os.WriteFile(inFile, []byte(source), 0644); err != nil {
+		return "", fmt.Errorf("write mermaid source: %w", err)
+	}
+
+	cmd := exec.Command("mmdc", "-i", inFile, "-o", outFile, "-b", "white", "-s", "2")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("mmdc failed: %w\n%s", err, string(out))
+	}
+	return outFile, nil
+}
+
+func processMermaidBlocks(mdContent []byte, tmpDir string) ([]byte, []mermaidImage) {
+	canRender := hasMmdc()
+	var images []mermaidImage
+	idx := 0
+
+	result := mermaidBlockRe.ReplaceAllFunc(mdContent, func(match []byte) []byte {
+		submatch := mermaidBlockRe.FindSubmatch(match)
+		if len(submatch) < 2 {
+			return match
+		}
+		source := strings.TrimSpace(string(submatch[1]))
+
+		if canRender {
+			pngPath, err := renderMermaidToPNG(source, tmpDir, idx)
+			if err != nil {
+				log.Printf("Warning: could not render mermaid diagram %d: %v (falling back to text)", idx, err)
+				return mermaidFallbackMarkdown(source)
+			}
+			placeholder := fmt.Sprintf("![Diagram %d](mermaid-%d.png)", idx, idx)
+			images = append(images, mermaidImage{
+				placeholder: fmt.Sprintf("mermaid-%d.png", idx),
+				tmpFile:     pngPath,
+			})
+			idx++
+			return []byte(placeholder)
+		}
+
+		return mermaidFallbackMarkdown(source)
+	})
+
+	return result, images
+}
+
+func mermaidFallbackMarkdown(source string) []byte {
+	var b strings.Builder
+	b.WriteString("\n---\n\n**Diagram:**\n\n```\n")
+	b.WriteString(source)
+	b.WriteString("\n```\n\n---\n")
+	return []byte(b.String())
+}
+
 func convertMarkdownToEPUB(inputFile, outputFile string) error {
-	// Read markdown file
 	markdownContent, err := os.ReadFile(inputFile)
 	if err != nil {
 		return fmt.Errorf("failed to read markdown file: %w", err)
 	}
 
-	// Configure goldmark with syntax highlighting
+	tmpDir, err := os.MkdirTemp("", "ready-mermaid-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	markdownContent, mermaidImages := processMermaidBlocks(markdownContent, tmpDir)
+
 	md := goldmark.New(
 		goldmark.WithExtensions(
 			extension.GFM,
@@ -86,46 +162,47 @@ func convertMarkdownToEPUB(inputFile, outputFile string) error {
 		goldmark.WithParserOptions(
 			parser.WithAutoHeadingID(),
 		),
-	goldmark.WithRendererOptions(
-		goldhtmlrenderer.WithHardWraps(),
-		goldhtmlrenderer.WithXHTML(),
-	),
+		goldmark.WithRendererOptions(
+			goldhtmlrenderer.WithHardWraps(),
+			goldhtmlrenderer.WithXHTML(),
+		),
 	)
 
-	// Convert markdown to HTML
 	var buf bytes.Buffer
 	if err := md.Convert(markdownContent, &buf); err != nil {
 		return fmt.Errorf("failed to convert markdown to HTML: %w", err)
 	}
 
-	// Create EPUB
 	e := epub.NewEpub(filepath.Base(strings.TrimSuffix(inputFile, filepath.Ext(inputFile))))
-
-	// Set metadata
 	e.SetAuthor("Markdown to EPUB Converter")
 	e.SetDescription("Converted from markdown file: " + inputFile)
 
-	// Add CSS for syntax highlighting and code formatting
-	// Create a temporary CSS file
-	tmpDir := os.TempDir()
 	tmpCSSFile := filepath.Join(tmpDir, "epub-styles.css")
 	if err := os.WriteFile(tmpCSSFile, []byte(getCodeCSS()), 0644); err != nil {
 		return fmt.Errorf("failed to write temporary CSS file: %w", err)
 	}
-	defer os.Remove(tmpCSSFile)
 
 	cssPath, err := e.AddCSS(tmpCSSFile, "styles.css")
 	if err != nil {
 		return fmt.Errorf("failed to add CSS: %w", err)
 	}
 
-	// Add content as a section (go-epub will wrap it in proper HTML structure)
-	_, err = e.AddSection(buf.String(), "content.xhtml", "", cssPath)
+	htmlContent := buf.String()
+
+	for _, img := range mermaidImages {
+		epubImgPath, err := e.AddImage(img.tmpFile, img.placeholder)
+		if err != nil {
+			log.Printf("Warning: could not add mermaid image %s to EPUB: %v", img.placeholder, err)
+			continue
+		}
+		htmlContent = strings.ReplaceAll(htmlContent, img.placeholder, epubImgPath)
+	}
+
+	_, err = e.AddSection(htmlContent, "content.xhtml", "", cssPath)
 	if err != nil {
 		return fmt.Errorf("failed to add content section: %w", err)
 	}
 
-	// Write EPUB file
 	err = e.Write(outputFile)
 	if err != nil {
 		return fmt.Errorf("failed to write EPUB file: %w", err)
