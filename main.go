@@ -231,7 +231,7 @@ func getCodeCSS() string {
 	// CSS for syntax highlighting (GitHub style) and proper code formatting
 	css := `
 /* GitHub-style syntax highlighting */
-.highlight { background: #f8f8f8; }
+.highlight { background: #ffffff; }
 .chroma .err { color: #a61717; background-color: #e3d2d2; }
 .chroma .k { color: #000000; font-weight: bold; }
 .chroma .ch { color: #111111; font-style: normal; }
@@ -300,8 +300,8 @@ func getCodeCSS() string {
 
 /* Code block styling */
 pre {
-    background-color: #f8f8f8;
-    border: 1px solid #e1e4e8;
+    background-color: #ffffff;
+    border: 1px solid #cccccc;
     border-radius: 6px;
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     font-size: 12px;
@@ -312,7 +312,8 @@ pre {
 }
 
 code {
-    background-color: rgba(27, 31, 35, 0.05);
+    background-color: #ffffff;
+    border: 1px solid #cccccc;
     border-radius: 3px;
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     font-size: 85%;
