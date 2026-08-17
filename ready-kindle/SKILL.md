@@ -1,134 +1,65 @@
 ---
 name: ready-kindle
 description: >-
-  Converts Markdown to Kindle MOBI or EPUB using the `ready` CLI from this
-  repository (`read/main.go`, `read/install.sh`), with a fixed layout under
-  `~/md/` and `~/md/kindle/`, and emails the EPUB straight to the user's
-  Kindle via SMTP using the Hermes email account. Use when the user wants
-  Kindle-compatible output, MOBI/EPUB from Markdown, wants a document sent
-  to their Kindle, mentions `ready`, Calibre, or md/kindle folders.
+  Converts Markdown to Kindle EPUB and emails it straight to the user's
+  Kindle in one command (md-to-kindle.py in this repo — stdlib only, no
+  Calibre/Go needed). Use when the user wants a Markdown document on their
+  Kindle, mentions Kindle, EPUB, Send-to-Kindle, or md-to-kindle.
 ---
 
-# Markdown to Kindle via `ready`
+# Markdown to Kindle
 
-This Skill file lives in the **`skills` repository**; the tool source is in
-the `read/` subfolder (`read/main.go`, `read/install.sh`). Build and install
-from that subfolder.
+One command converts Markdown to EPUB and emails it to the Kindle:
+
+```bash
+~/dev/skills/ready-kindle/md-to-kindle.py ~/md/my-doc.md "my-doc"
+```
+
+- **Input**: any `.md` file
+- **Subject**: optional; defaults to the file name
+- **Output**: EPUB attached to an email → Amazon delivers it to the Kindle
+- **No installs**: pure Python stdlib (zipfile + smtplib)
 
 ## When to use
 
-- Converting Markdown to **MOBI** (Kindle) or **EPUB**
-- User wants a document **sent/emailed to their Kindle** (see *Email to Kindle* below)
-- User mentions **`ready`**, this repo, **Calibre**, or **`~/md`** / **`kindle`**
+- User wants a document **sent to their Kindle**
+- User mentions Kindle, EPUB, Send-to-Kindle, or `md-to-kindle`
+- User has a Markdown doc they want to read on-device
 
-## Tool location and install
+## Configuration
 
-- **Repository**: `~/dev/skills/` — tool source in `read/`.
-- **Install**: from `~/dev/skills/read/`, run `./install.sh` — builds with Go
-  and copies to **`~/bin/ready`**.
-- **PATH**: ensure `~/bin` is on `PATH` (e.g. `export PATH="$HOME/bin:$PATH"` in shell config).
+All config comes from `~/.hermes/.env` (same file as the Hermes email
+gateway). Nothing else to set up:
 
-## Prerequisites
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `EMAIL_ADDRESS` | Sender (must be on Amazon's approved list) | required |
+| `EMAIL_PASSWORD` | Gmail app password | required |
+| `EMAIL_KINDLE_ADDRESS` | Destination Kindle address | `adolfo.heriz.ocampo_QSaEKm@kindle.com` |
+| `EMAIL_SMTP_HOST` | SMTP host | `smtp.gmail.com` |
+| `EMAIL_SMTP_PORT` | SMTP port | `587` |
+| `EMAIL_SENDER_NAME` | From display name | none |
 
-| Need | Notes |
-|------|--------|
-| Go 1.21+ | To build via `install.sh` or `go build -o ready main.go` |
-| `ready` on PATH | Typically `~/bin/ready` after install |
-| Calibre (MOBI only) | Provides `ebook-convert`; Arch: `sudo pacman -S calibre` |
+The default Kindle address is already correct; you only touch config if you
+change Kindle or email account.
 
-**EPUB-only**: Calibre is not required for the final EPUB file; `ready` writes
-EPUB directly. **MOBI** always uses Calibre's `ebook-convert` after an
-internal EPUB step.
+## How it works
 
-## Folder convention (default)
+1. Converts Markdown to a minimal EPUB 2 (headings, paragraphs, lists, code
+   blocks, inline bold/code/links) using only the Python standard library.
+2. Attaches the EPUB to an email from `EMAIL_ADDRESS`.
+3. Sends via SMTP (STARTTLS, or implicit TLS on port 465).
 
-Keep sources and outputs predictable:
-
-| Role | Path |
-|------|------|
-| Source Markdown | `~/md/<name>.md` |
-| Kindle / export | `~/md/kindle/<name>.mobi` or `.epub` |
-
-Do not assume a different layout unless the user specifies one.
-
-## Workflow
-
-1. Save the Markdown file under **`~/md/<name>.md`**.
-2. Ensure the output directory exists: `mkdir -p ~/md/kindle`.
-3. Run **`ready`** with **explicit `-output`** so the MOBI/EPUB lands in
-   `kindle/` (omitting `-output` places the file next to the input).
-
-### MOBI (default format)
-
-```bash
-mkdir -p ~/md/kindle
-ready -input ~/md/my-doc.md -output ~/md/kindle/my-doc.mobi
-```
-
-### EPUB
-
-```bash
-mkdir -p ~/md/kindle
-ready -input ~/md/my-doc.md -format epub -output ~/md/kindle/my-doc.epub
-```
-
-### CLI reference
-
-- **`-input`** — input `.md` file (required)
-- **`-format`** — `mobi` or `epub` (default: `mobi`)
-- **`-output`** — output path (recommended for `md/kindle/` layout)
-
-## Email to Kindle
-
-When the user wants the document delivered to their Kindle (the default when
-they ask to "send" something to Kindle), email the file via SMTP after
-converting.
-
-- **Kindle address**: `adolfo.heriz.ocampo_QSaEKm@kindle.com`
-- **Format must be EPUB.** Amazon's Send-to-Kindle email rejects `.mobi`
-  attachments (dropped in 2022). Always convert with `-format epub` for this
-  flow — Calibre is not needed.
-- **Sender**: the Hermes email account (`adolfo.heriz.ocampo@gmail.com`,
-  configured via `EMAIL_ADDRESS` in `~/.hermes/.env`), which must be on
-  Amazon's Approved Personal Document E-mail List.
-
-### Workflow
-
-1. Convert to EPUB into the usual layout:
-
-   ```bash
-   mkdir -p ~/md/kindle
-   ready -input ~/md/my-doc.md -format epub -output ~/md/kindle/my-doc.epub
-   ```
-
-2. Send it with the helper script (reads SMTP creds from `~/.hermes/.env`):
-
-   ```bash
-   ~/dev/skills/ready-kindle/scripts/send-to-kindle.py \
-     ~/md/kindle/my-doc.epub "my-doc"
-   ```
-
-   The script attaches the EPUB as `my-doc.epub` and sends from
-   `EMAIL_ADDRESS` to the Kindle address above. It honours
-   `EMAIL_SENDER_NAME` for the From display name.
-
-### Email pitfalls
-
-- **Send is fire-and-forget** — success means queued, not delivered. If the
-  document never arrives, check the SMTP response and that the sender is on
-  Amazon's approved list.
-- **MOBI attachment** — if a `.mobi` was emailed by mistake, Amazon bounces
-  or silently drops it; re-send as EPUB.
-- **Wrong sender** — `EMAIL_ADDRESS` in `~/.hermes/.env` must be the Gmail
-  address approved by Amazon. Do not invent or substitute another address.
+Amazon's Send-to-Kindle accepts EPUB and rejects `.mobi` (dropped 2022), so
+this flow only produces EPUB.
 
 ## Pitfalls
 
-- **`ready` not found** — build/install from `~/dev/skills/read/`
-  (`./install.sh`) and confirm `~/bin` on PATH.
-- **MOBI errors about `ebook-convert`** — install Calibre; MOBI conversion
-  depends on it.
-- **Wrong output location** — without `-output`, the default is beside the
-  input file; use `-output ~/md/kindle/...` for this workflow.
-- **Old paths** — this skill previously targeted macOS (`~/Desktop/md`,
-  Apple Mail, `osascript`). On Linux use `~/md` and the SMTP helper.
+- **Email never arrives** — confirm `EMAIL_ADDRESS` is on Amazon's Approved
+  Personal Document E-mail List, and check `EMAIL_PASSWORD` is an app
+  password (2FA breaks plain passwords).
+- **Send is fire-and-forget** — success means queued to SMTP, not delivered
+  to the device; Kindle delivery can take a minute or two.
+- **Old tool** — the repo still contains `read/` (the Go `ready` CLI and
+  Calibre-based MOBI path) from before; prefer `md-to-kindle.py` for the
+  email flow. The old Apple Mail / osascript flow is obsolete.
