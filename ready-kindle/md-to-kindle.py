@@ -21,6 +21,7 @@ import smtplib
 import ssl
 import sys
 import tempfile
+import uuid
 import zipfile
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
@@ -111,7 +112,12 @@ def md_to_html(md_text: str) -> str:
 
 # ── EPUB writer (EPUB 2, accepted by Send-to-Kindle) ─────────────────────
 
+def _uid(title: str) -> str:
+    return f"urn:uuid:{uuid.uuid5(uuid.NAMESPACE_URL, 'md2kindle:' + title)}"
+
+
 def build_epub(md_text: str, title: str, out_path: Path) -> None:
+    uid = _uid(title)
     body = md_to_html(md_text)
     content = f"""<?xml version="1.0" encoding="utf-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml">
@@ -131,7 +137,7 @@ def build_epub(md_text: str, title: str, out_path: Path) -> None:
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:title>{_escape(title)}</dc:title>
     <dc:language>en</dc:language>
-    <dc:identifier id="uid">urn:uuid:md2kindle-{abs(hash(title))}</dc:identifier>
+    <dc:identifier id="uid">{uid}</dc:identifier>
   </metadata>
   <manifest>
     <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
@@ -143,7 +149,7 @@ def build_epub(md_text: str, title: str, out_path: Path) -> None:
 </package>"""
     ncx = f"""<?xml version="1.0" encoding="utf-8"?>
 <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
-  <head><meta name="dtb:uid" content="urn:uuid:md2kindle-{abs(hash(title))}"/></head>
+  <head><meta name="dtb:uid" content="{uid}"/></head>
   <docTitle><text>{_escape(title)}</text></docTitle>
   <navMap><navPoint id="p1" playOrder="1"><navLabel><text>{_escape(title)}</text></navLabel><content src="chapter1.xhtml"/></navPoint></navMap>
 </ncx>"""
